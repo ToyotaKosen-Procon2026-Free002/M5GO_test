@@ -1,97 +1,83 @@
 #include <M5Stack.h>
 #include <Adafruit_NeoPixel.h>
-#include <WiFi.h>
-#include <esp_now.h>
-
-// ボタンのピン番号の定義
-#define BUTTON_A_PIN 39
-#define BUTTON_B_PIN 38
-#define BUTTON_C_PIN 37
+#include <NimBLEDevice.h>
 
 // LEDバーのピン番号とLEDの数の定義
 #define LED_BAR_PIN 15
 #define NUM_LED 10
 
+// BluetoothのサービスUUIDの定義（その他のBluetooth通信と区別するため）
+#define SERVICE_UUID "42fbd1f2-b02c-1ba6-87f8-7d9ca4f3a343"
+
+// RSSIの閾値（この値以上のRSSIを近いとみなす）
+#define NEARBY_THRESHOLD -40
+
 // NeoPixel（LED制御）のインスタンスを作成
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUM_LED, LED_BAR_PIN, NEO_GRB + NEO_KHZ800);
 
-// 送信先のMACアドレス、ブロードキャストに設定
-uint8_t address[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-esp_now_peer_info_t peerInfo;
+// Bluetoothの広告とスキャンのインスタンス
+NimBLEAdvertising *pAdvertising;
+NimBLEScan *pScan;
 
-bool isButtonPressing = false;
+// 画面ちらつき防止でSpriteを使用
+TFT_eSprite sprite = TFT_eSprite(&M5.Lcd);
 
-// データを送った際のコールバック関数（ブロードキャストでは常に成功とみなされるらしい）
-void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  M5.Lcd.setCursor(0, 0);
-  M5.Lcd.clear();
-  M5.Lcd.printf("Last Packet Send Status:\n %s\n", status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-  M5.Lcd.printf("Sent to:\n %02X:%02X:%02X:%02X:%02X:%02X\n", mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-}
 
-// データを受け取った際のコールバック関数
-void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
-  M5.Lcd.setCursor(0, 0);
-  M5.Lcd.clear();
-  M5.Lcd.printf("Received data from:\n %02X:%02X:%02X:%02X:%02X:%02X\n", mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
-  M5.Lcd.printf("Data:\n %.*s\n", data_len, data);
-}
+// Bluetoothのスキャンのコールバッククラス
+class ScanCallbacks : public NimBLEScanCallbacks {
+  void onResult(const NimBLEAdvertisedDevice *device) override {
+    if (device->isAdvertisingService(NimBLEUUID(SERVICE_UUID))) {
+      int rssi = device->getRSSI();
+      std::string addr = device->getAddress().toString();
 
-// データを送る関数
-void sendData(const char *message) {
-  esp_now_send(address, (uint8_t*)message, strlen(message));
-}
+      sprite.fillScreen(BLACK);
+      sprite.setCursor(0, 0);
+      sprite.printf("Device:\n %s\n", addr.c_str());
+      sprite.printf("RSSI:\n %d dBm\n", rssi);
+      sprite.pushSprite(0, 0);
+
+      if (rssi > NEARBY_THRESHOLD) { // RSSI（信号強度）が閾値以上なら近いとみなす
+        pixels.fill(pixels.Color(0, 255, 0)); // 緑色で点灯
+        pixels.show();
+      } else {
+        pixels.fill(pixels.Color(0, 0, 0)); // 消灯
+        pixels.show();
+      }
+    }
+  }
+};
 
 void setup() {
   // 初期化処理
   M5.begin();
-  M5.Lcd.setTextSize(2);
 
-  pixels.begin();
+  // メモリ競合を防止するため、Classic Bluetoothのメモリを解放
+  esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
 
-  // ESP-NOWの初期化
-  WiFi.mode(WIFI_STA);
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("Error initializing ESP-NOW");
-    return;
-  }
+  // Bluetoothの初期化
+  NimBLEDevice::init("ESP_NODE");
 
-  // 通信の情報を設定
-  memcpy(peerInfo.peer_addr, address, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
+  // Bluetoothの広告の設定
+  pAdvertising = NimBLEDevice::getAdvertising();
+  NimBLEAdvertisementData advData;
+  advData.setName("ESP_NODE");
+  advData.addServiceUUID(SERVICE_UUID);
+  pAdvertising->setAdvertisementData(advData);
+  pAdvertising->start();
 
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("Failed to add peer");
-    return;
-  }
+  // Bluetoothのスキャンの設定
+  pScan = NimBLEDevice::getScan();
+  pScan->setActiveScan(true);
+  pScan->setInterval(100);
+  pScan->setWindow(100);
+  pScan->setScanCallbacks(new ScanCallbacks(), true);
+  pScan->start(0, false, true);
 
-  // 送信と受信のコールバック関数を登録
-  esp_now_register_send_cb(onDataSent);
-  esp_now_register_recv_cb(OnDataRecv);
+  // スプライトの初期化
+  sprite.setColorDepth(8);
+  sprite.setTextSize(2);
+  sprite.createSprite(M5.Lcd.width(), M5.Lcd.height());
 }
 
 void loop() {
-  M5.update();
-
-  if (digitalRead(BUTTON_A_PIN) == LOW && !isButtonPressing) { // ボタンAが押されたとき「Button A Pressed」というメッセージを送り、LEDバーを赤色に光らせる
-    sendData("Button A Pressed");
-    pixels.fill(pixels.Color(255, 0, 0), 0, NUM_LED);
-    pixels.show();
-    isButtonPressing = true;
-  } else if (digitalRead(BUTTON_B_PIN) == LOW && !isButtonPressing) { // ボタンBが押されたとき「Button B Pressed」というメッセージを送り、LEDバーを緑色に光らせる
-    sendData("Button B Pressed");
-    pixels.fill(pixels.Color(0, 255, 0), 0, NUM_LED);
-    pixels.show();
-    isButtonPressing = true;
-  } else if (digitalRead(BUTTON_C_PIN) == LOW && !isButtonPressing) { // ボタンCが押されたとき「Button C Pressed」というメッセージを送り、LEDバーを青色に光らせる
-    sendData("Button C Pressed");
-    pixels.fill(pixels.Color(0, 0, 255), 0, NUM_LED);
-    pixels.show();
-    isButtonPressing = true;
-  } else if (digitalRead(BUTTON_A_PIN) == HIGH && digitalRead(BUTTON_B_PIN) == HIGH && digitalRead(BUTTON_C_PIN) == HIGH) { // どのボタンも押されていなければLEDバーを消灯する
-    isButtonPressing = false;
-    pixels.fill(pixels.Color(0, 0, 0), 0, NUM_LED);
-    pixels.show();
-  }
 }
