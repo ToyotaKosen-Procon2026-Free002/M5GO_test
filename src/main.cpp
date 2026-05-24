@@ -2,7 +2,6 @@
 #include <Adafruit_NeoPixel.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
-#include <WiFiClient.h>
 #include <HTTPClient.h>
 
 // LEDバーのピン番号とLEDの数の定義
