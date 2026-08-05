@@ -25,7 +25,8 @@ TFT_eSprite sprite = TFT_eSprite(&M5.Lcd);
 // WiFi設定の定義
 const char* ssid = "icewave-G";
 const char* password = "20240831A#z";
-const char* serverUrl = "https://192.168.10.10"; // UbuntuサーバーURL
+// coco-seal.mydns.jp
+const char* serverUrl = "http://157.17.49.151";
 
 bool sosSent = false;
 
