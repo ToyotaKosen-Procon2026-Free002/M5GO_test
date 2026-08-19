@@ -56,7 +56,7 @@ std::vector<String>        distributed_today_list;  // 当日配布済み子機I
 
 // ESP-NOW パケット構造体
 struct CommunicationPacket {
-  char child_id[16];  // 子機ID
+  char device_id[16];  // 子機ID
   int type;           // 0: 通過検知, 1: SOS
   char stickerId[16]; // 配布シールID
 };
