@@ -34,7 +34,7 @@ bool sosSent = false;
 const int RSSI_THRESHOLD = -60;
 
 struct CommunicationPacket {
-  char senderId[16];  // 子機ID
+  char child_id[16];  // 子機ID
   int type;           // 0: 通過検知, 1: SOS
   char stickerId[16]; // 配布シールID
 };
@@ -110,32 +110,30 @@ void updateDisplay() {
 // ① 通過ログの送信 (Ubuntuへ)
 void sendPassLog(String childId) {
   if (WiFi.status() != WL_CONNECTED) return;
-  WiFiClientSecure client;
-  HTTPClient https;
-  client.setInsecure();
+  WiFiClient client;
+  HTTPClient http;
 
-  if (https.begin(client, String(serverUrl) + "/api/pass_log")) {
-    https.addHeader("Content-Type", "application/json");
+if (http.begin(client, String(serverUrl) + "/api/pass_log")) {
+    http.addHeader("Content-Type", "application/json");
     String body = "{\"childId\":\"" + childId + "\",\"parentId\":\"PARENT_01\"}";
-    https.POST(body);
-    https.end();
+    http.POST(body);
+    http.end();
   }
 }
 
 // ② SOSの検証 (サーバーへ問い合わせ)
 void processSosSignal(String childId) {
   if (WiFi.status() != WL_CONNECTED) return;
-  WiFiClientSecure client;
-  HTTPClient https;
-  client.setInsecure();
+  WiFiClient client;
+  HTTPClient http;
 
   // LEDを赤く光らせる
   pixels.fill(pixels.Color(255, 0, 0), 0, NUM_LED);
   pixels.show();
 
-  if (https.begin(client, String(serverUrl) + "/api/verify_sos?id=" + childId)) {
-    int code = https.GET();
-    String response = https.getString();
+  if (http.begin(client, String(serverUrl) + "/api/verify_sos?id=" + childId)) {
+    int code = http.GET();
+    String response = http.getString();
 
     // 本物・ダミーの検証判定
     if (code == 200 && response.indexOf("REAL") != -1) {
@@ -144,7 +142,7 @@ void processSosSignal(String childId) {
     } else {
       currentState = STATE_DUMMY_SOS_ALERT;
     }
-    https.end();
+    http.end();
   } else {
     // サーバーへ繋がらない場合は安全のため本物警告扱い
     currentState = STATE_SOS_ALERT;
@@ -158,20 +156,19 @@ void processSosSignal(String childId) {
 // ③ サーバーからの設定同期
 void syncSettingsWithServer() {
   if (WiFi.status() != WL_CONNECTED) return;
-  WiFiClientSecure client;
-  HTTPClient https;
-  client.setInsecure();
+  WiFiClient client;
+  HTTPClient http;
 
-  if (https.begin(client, String(serverUrl) + "/api/get_setting")) {
-    int code = https.GET();
+  if (http.begin(client, String(serverUrl) + "/api/get_setting")) {
+    int code = http.GET();
     if (code == 200) {
-      String newSticker = https.getString();
+      String newSticker = http.getString();
       if (newSticker.length() > 0) {
         currentSticker = newSticker;
       }
       lastSyncTime = "12:00"; // 簡易同期時刻表記
     }
-    https.end();
+    http.end();
   }
 }
 
@@ -202,7 +199,7 @@ void checkAndSendSticker(String childId, int rssi) {
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   CommunicationPacket packet;
   memcpy(&packet, incomingData, sizeof(packet));
-  String childId = String(packet.senderId);
+  String childId = String(packet.child_id);
 
   if (packet.type == 1) {
     processSosSignal(childId); // SOS受信
