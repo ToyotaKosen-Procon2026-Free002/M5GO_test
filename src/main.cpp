@@ -7,6 +7,8 @@
 #include <vector>
 #include <algorithm>
 
+
+// ハードウェア設定
 // LEDバーのピン番号とLEDの数の定義
 #define LED_BAR_PIN 15
 #define NUM_LED 10
@@ -16,7 +18,6 @@
 #define BUTTON_B_PIN 38
 #define BUTTON_C_PIN 37
 
-// ハードウェア設定
 // NeoPixel（LED制御）のインスタンスを作成
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUM_LED, LED_BAR_PIN, NEO_GRB + NEO_KHZ800);
 // 画面ちらつき防止でSpriteを使用
@@ -28,9 +29,15 @@ const char* wifi_password = "20240831A#z";
 // coco-seal.mydns.jp
 const char* serverUrl = "http://157.17.49.151";
 
+// 日本標準時（JST = UTC+9）設定
+const long  gmtOffset_sec     = 9 * 3600;
+const int   daylightOffset_sec = 0;
+const char* ntpServer         = "ntp.nict.jp";
+
 // 親機固有情報
 String device_id             = "M5-0001"; // 親機ID
 String distribute_sticker_id = "st_110";  // 配布するシールの種類ID
+String last_sync_time        = "未同期";   // 最終同期時刻
 
 // 未送信ログの構造体
 struct DistributeLog {
@@ -64,9 +71,21 @@ enum State {
 
 // システム管理用変数
 State currentState = STATE_IDLE;
-String lastSyncTime   = "未同期";         // 最終同期時刻
 unsigned long stateTimer = 0;
 const int RSSI_THRESHOLD = -60;
+
+// ==========================================
+// 時刻取得関数
+// ==========================================
+String getDeviceTimestamp() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    return "1970-01-01 00:00:00"; 
+  }
+  char buf[30];
+  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+  return String(buf);
+}
 
 // =============
 // 画面表示処理
