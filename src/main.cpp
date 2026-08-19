@@ -16,23 +16,38 @@
 #define BUTTON_B_PIN 38
 #define BUTTON_C_PIN 37
 
+// ハードウェア設定
 // NeoPixel（LED制御）のインスタンスを作成
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUM_LED, LED_BAR_PIN, NEO_GRB + NEO_KHZ800);
-
 // 画面ちらつき防止でSpriteを使用
 TFT_eSprite sprite = TFT_eSprite(&M5.Lcd);
 
 // WiFi設定の定義
-const char* ssid = "icewave-G";
-const char* password = "20240831A#z";
+const char* wifi_ssid = "icewave-G";
+const char* wifi_password = "20240831A#z";
 // coco-seal.mydns.jp
 const char* serverUrl = "http://157.17.49.151";
 
-bool sosSent = false;
+// 親機固有情報
+String device_id             = "M5-0001"; // 親機ID
+String distribute_sticker_id = "st_110";  // 配布するシールの種類ID
 
-// 近距離判定の電波強度閾値 (dBm)
-const int RSSI_THRESHOLD = -60;
+// 未送信ログの構造体
+struct DistributeLog {
+  String device_id; // すれ違った子機のID
+  String device_timestamp; // 記録時刻
+};
 
+struct SosLog {
+  String device_id; // SOSを発信した子機のID
+  String device_timestamp; // 記録時刻
+};
+
+std::vector<DistributeLog> pending_distribute_logs; // クラウド未送信のシール配布ログ
+std::vector<SosLog>        pending_sos_logs;        // クラウド未送信の緊急SOSログ
+std::vector<String>        distributed_today_list;  // 当日配布済み子機ID（重複防止用）
+
+// ESP-NOW パケット構造体
 struct CommunicationPacket {
   char child_id[16];  // 子機ID
   int type;           // 0: 通過検知, 1: SOS
@@ -49,10 +64,9 @@ enum State {
 
 // システム管理用変数
 State currentState = STATE_IDLE;
-String currentSticker = "RareSticker_A"; // 現在のシール設定
 String lastSyncTime   = "未同期";         // 最終同期時刻
-std::vector<String> distributedList;    // 当日配布した子機ID（二重配布防止）
-unsigned long stateTimer = 0;           // 画面切替タイマー
+unsigned long stateTimer = 0;
+const int RSSI_THRESHOLD = -60;
 
 // =============
 // 画面表示処理
@@ -64,10 +78,10 @@ void updateDisplay() {
   switch (currentState) {
     case STATE_IDLE:
       sprite.setTextColor(WHITE);
-      sprite.println("=== Normal Mode ===");
-      sprite.println();
-      sprite.println("Sticker:");
-      sprite.println(currentSticker);
+      sprite.println("=== Station Mode ===");
+      sprite.printf("ID: %s\n\n", device_id.c_str());
+      sprite.println("Distribute Sticker:");
+      sprite.println(distribute_sticker_id);
       break;
 
     case STATE_STICKER_DISPLAY:
@@ -75,13 +89,13 @@ void updateDisplay() {
       sprite.println("=== Distributed ===");
       sprite.println();
       sprite.println("Sticker Sent!");
+      sprite.println(distribute_sticker_id);
       break;
 
     case STATE_SOS_ALERT:
       sprite.setTextColor(RED);
       sprite.println("!! SOS ALERT !!");
       sprite.println();
-      sprite.println("Distance: ~?m");
       sprite.println("SOS Triggered!");
       break;
 
@@ -95,9 +109,11 @@ void updateDisplay() {
     case STATE_SHOW_SETTING:
       sprite.setTextColor(CYAN);
       sprite.println("=== Settings ===");
-      sprite.println();
-      sprite.print("Sync: "); sprite.println(lastSyncTime);
-      sprite.print("Item: "); sprite.println(currentSticker);
+      sprite.printf("Station: %s\n", device_id.c_str());
+      sprite.printf("Sticker: %s\n", distribute_sticker_id.c_str());
+      sprite.printf("Pending Dist: %d\n", pending_distribute_logs.size());
+      sprite.printf("Pending SOS : %d\n", pending_sos_logs.size());
+      sprite.printf("Last Sync   : %s\n", last_sync_time.c_str());
       break;
   }
   
@@ -107,86 +123,109 @@ void updateDisplay() {
 // =================
 // サーバー通信機能
 // =================
-// ① 通過ログの送信 (Ubuntuへ)
-void sendPassLog(String childId) {
-  if (WiFi.status() != WL_CONNECTED) return;
+// ① 配布ログの送信
+void syncDistributeLogs() {
+  if (pending_distribute_logs.empty() || WiFi.status() != WL_CONNECTED) return;
+
   WiFiClient client;
   HTTPClient http;
 
-if (http.begin(client, String(serverUrl) + "/api/pass_log")) {
+  if (http.begin(client, String(serverUrl) + "/api/stations/logs/distribute")) {
     http.addHeader("Content-Type", "application/json");
-    String body = "{\"childId\":\"" + childId + "\",\"parentId\":\"PARENT_01\"}";
-    http.POST(body);
+
+    // JSON
+    String body = "{\"station_device_id\":\"" + device_id + "\",\"logs\":[";
+    for (size_t i = 0; i < pending_distribute_logs.size(); i++) {
+      body += "{\"device_id\":\"" + pending_distribute_logs[i].device_id + "\",";
+      body += "\"device_timestamp\":\"" + pending_distribute_logs[i].device_timestamp + "\"}";
+      if (i < pending_distribute_logs.size() - 1) body += ",";
+    }
+    body += "]}";
+
+    int httpCode = http.POST(body);
+    if (httpCode == 200) {
+      pending_distribute_logs.clear(); // 送信成功したらキューをクリア
+      last_sync_time = "OK (" + getDeviceTimestamp() + ")";
+    }
     http.end();
   }
 }
 
-// ② SOSの検証 (サーバーへ問い合わせ)
-void processSosSignal(String childId) {
-  if (WiFi.status() != WL_CONNECTED) return;
-  WiFiClient client;
-  HTTPClient http;
+// ② SOSログの送信
+void syncSosLogs(String child_device_id) {
+  // SOSログを未送信キューに追加
+  pending_sos_logs.push_back({child_device_id, getDeviceTimestamp()});
 
-  // LEDを赤く光らせる
+  // LED・ブザー警告
   pixels.fill(pixels.Color(255, 0, 0), 0, NUM_LED);
   pixels.show();
+  currentState = STATE_SOS_ALERT;
+  M5.Speaker.tone(1000, 500);
 
-  if (http.begin(client, String(serverUrl) + "/api/verify_sos?id=" + childId)) {
-    int code = http.GET();
-    String response = http.getString();
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFiClient client;
+    HTTPClient http;
 
-    // 本物・ダミーの検証判定
-    if (code == 200 && response.indexOf("REAL") != -1) {
-      currentState = STATE_SOS_ALERT;
-      M5.Speaker.tone(1000, 500); // 警告ブザーを鳴らす
-    } else {
-      currentState = STATE_DUMMY_SOS_ALERT;
+    if (http.begin(client, String(serverUrl) + "/api/stations/logs/sos")) {
+      http.addHeader("Content-Type", "application/json");
+
+      String body = "{\"station_device_id\":\"" + device_id + "\",\"logs\":[";
+      for (size_t i = 0; i < pending_sos_logs.size(); i++) {
+        body += "{\"device_id\":\"" + pending_sos_logs[i].device_id + "\",";
+        body += "\"device_timestamp\":\"" + pending_sos_logs[i].device_timestamp + "\"}";
+        if (i < pending_sos_logs.size() - 1) body += ",";
+      }
+      body += "]}";
+
+      int httpCode = http.POST(body);
+      if (httpCode == 200) {
+        pending_sos_logs.clear();
+      }
+      http.end();
     }
-    http.end();
-  } else {
-    // サーバーへ繋がらない場合は安全のため本物警告扱い
-    currentState = STATE_SOS_ALERT;
-    M5.Speaker.tone(1000, 500);
   }
-  
+
   stateTimer = millis();
   updateDisplay();
 }
 
-// ③ サーバーからの設定同期
-void syncSettingsWithServer() {
+// ③ 親機設定の同期
+void fetchStationConfig() {
   if (WiFi.status() != WL_CONNECTED) return;
   WiFiClient client;
   HTTPClient http;
 
-  if (http.begin(client, String(serverUrl) + "/api/get_setting")) {
+  if (http.begin(client, String(serverUrl) + "/api/stations/" + device_id + "/config")) {
     int code = http.GET();
     if (code == 200) {
-      String newSticker = http.getString();
-      if (newSticker.length() > 0) {
-        currentSticker = newSticker;
+      String response = http.getString();
+      // レスポンスから distribute_sticker_id を抽出
+      int idx = response.indexOf("\"distribute_sticker_id\":\"");
+      if (idx != -1) {
+        int start = idx + 25;
+        int end = response.indexOf("\"", start);
+        distribute_sticker_id = response.substring(start, end);
       }
-      lastSyncTime = "12:00"; // 簡易同期時刻表記
+      last_sync_time = "Config OK";
     }
     http.end();
   }
 }
 
 // ==================
-// 通信 & ロジック
+// すれ違い＆パケット受信
 // ==================
-// 子機検知＆シール配布チェック
-void checkAndSendSticker(String childId, int rssi) {
-  sendPassLog(childId); // 通過ログ作成＆送信
+void checkAndDistributeSticker(String child_device_id, int rssi) {
+  // 配布ログをキューに追加
+  pending_distribute_logs.push_back({child_device_id, getDeviceTimestamp()});
+  syncDistributeLogs();
 
-  // 近距離判定
   if (rssi >= RSSI_THRESHOLD) {
-    // 重複配布チェック (二重配布防止)
-    auto it = std::find(distributedList.begin(), distributedList.end(), childId);
-    if (it == distributedList.end()) {
-      distributedList.push_back(childId); // 配布済みリストに追加
+    auto it = std::find(distributed_today_list.begin(), distributed_today_list.end(), child_device_id);
+    if (it == distributed_today_list.end()) {
+      distributed_today_list.push_back(child_device_id);
 
-      // TODO: ESP-NOWで子機へcurrentStickerを送信する処理
+      // TODO: ESP-NOWで子機へ distribute_sticker_id を送信
 
       currentState = STATE_STICKER_DISPLAY;
       stateTimer = millis();
@@ -195,16 +234,17 @@ void checkAndSendSticker(String childId, int rssi) {
   }
 }
 
-// ESP-NOW パケット受信コールバック
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   CommunicationPacket packet;
-  memcpy(&packet, incomingData, sizeof(packet));
-  String childId = String(packet.child_id);
+  if (len == sizeof(packet)) {
+    memcpy(&packet, incomingData, sizeof(packet));
+    String child_device_id = String(packet.device_id);
 
-  if (packet.type == 1) {
-    processSosSignal(childId); // SOS受信
-  } else if (packet.type == 0) {
-    checkAndSendSticker(childId, -50); // 通過検知 (ダミーRSSI: -50)
+    if (packet.type == 1) {
+      syncSosLogs(child_device_id);
+    } else if (packet.type == 0) {
+      checkAndDistributeSticker(child_device_id, -50);
+    }
   }
 }
 
@@ -212,32 +252,27 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
 // setup & loop
 // ================
 void setup() {
-  // 初期化処理
   M5.begin();
 
-  // スプライトの初期化
   sprite.setColorDepth(8);
   sprite.setTextSize(2);
   sprite.createSprite(M5.Lcd.width(), M5.Lcd.height());
 
-  // Wi-Fi接続
+  pixels.begin();
+  pixels.clear();
+  pixels.show();
+
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  WiFi.begin(wifi_ssid, wifi_password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
   }
 
-  // ESP-NOW の初期化
   if (esp_now_init() == ESP_OK) {
     esp_now_register_recv_cb(OnDataRecv);
   }
 
-  // LED初期化
-  pixels.fill(pixels.Color(0, 0, 0, 0), 0, NUM_LED);
-  pixels.show();
-
-  // 初回設定同期 ＆ 画面描画
-  syncSettingsWithServer();
+  fetchStationConfig();
   currentState = STATE_IDLE;
   updateDisplay();
 }
@@ -245,30 +280,22 @@ void setup() {
 void loop() {
   M5.update();
 
-  // --- Button Manager ---
-  // 真ん中のボタン（BtnB）を押したとき設定表示
   if (M5.BtnB.wasPressed()) {
-    if (currentState != STATE_SHOW_SETTING) {
-      currentState = STATE_SHOW_SETTING;
-    } else {
-      currentState = STATE_IDLE;
-    }
+    currentState = (currentState != STATE_SHOW_SETTING) ? STATE_SHOW_SETTING : STATE_IDLE;
     updateDisplay();
   }
 
-  // Aボタンを押したとき（テスト用SOS自発送信）
   if (M5.BtnA.wasPressed()) {
-    processSosSignal("SELF_TEST");
+    syncSosLogs("ESP-TEST-0001");
   }
 
-  // --- 表示時間タイマー管理 ---
-  // SOS警告やシール配布完了の画面は5秒経過で通常画面に戻し、LEDを消灯する
+  // 5秒経過で通常待機画面へ復帰
   if (currentState == STATE_STICKER_DISPLAY || 
       currentState == STATE_SOS_ALERT || 
       currentState == STATE_DUMMY_SOS_ALERT) {
     
     if (millis() - stateTimer > 5000) {
-      pixels.fill(pixels.Color(0, 0, 0, 0), 0, NUM_LED); // LED消灯
+      pixels.clear();
       pixels.show();
       currentState = STATE_IDLE;
       updateDisplay();
