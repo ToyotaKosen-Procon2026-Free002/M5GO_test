@@ -304,10 +304,11 @@ void loop() {
     updateDisplay();
   }
 
-  if (M5.BtnA.wasPressed()) {
-    syncSosLogs("ESP-TEST-0001");
-  }
-
+  // ダミーSOS発信（テスト用）
+  //if (M5.BtnA.wasPressed()) {
+  //  syncSosLogs("ESP-TEST-0001");
+  //}
+ 
   // 5秒経過で通常待機画面へ復帰
   if (currentState == STATE_STICKER_DISPLAY || 
       currentState == STATE_SOS_ALERT || 
