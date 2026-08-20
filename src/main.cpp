@@ -35,8 +35,8 @@ const int   daylightOffset_sec = 0;
 const char* ntpServer         = "ntp.nict.jp";
 
 // 親機固有情報
-String device_id             = "M5-0001"; // 親機ID
-String distribute_sticker_id = "st_110";  // 配布するシールの種類ID
+String device_id             = ""; // 親機ID
+String distribute_sticker_id = "none";  // 配布するシールの種類ID
 String last_sync_time        = "未同期";   // 最終同期時刻
 
 // 未送信ログの構造体
@@ -97,10 +97,10 @@ void updateDisplay() {
   switch (currentState) {
     case STATE_IDLE:
       sprite.setTextColor(WHITE);
-      sprite.println("=== Station Mode ===");
+      sprite.println("=== Station Mode ==="); 
       sprite.printf("ID: %s\n\n", device_id.c_str());
       sprite.println("Distribute Sticker:");
-      sprite.println(distribute_sticker_id);
+      sprite.printf("ID: %s\n", distribute_sticker_id.c_str());
       break;
 
     case STATE_STICKER_DISPLAY:
@@ -108,7 +108,7 @@ void updateDisplay() {
       sprite.println("=== Distributed ===");
       sprite.println();
       sprite.println("Sticker Sent!");
-      sprite.println(distribute_sticker_id);
+      sprite.printf("ID: %s\n", distribute_sticker_id.c_str());
       break;
 
     case STATE_SOS_ALERT:
