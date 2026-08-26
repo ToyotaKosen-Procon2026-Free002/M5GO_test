@@ -1,3 +1,4 @@
+#include <WiFi.h>
 #include "BleManager.h"
 #include "StateManager.h"
 #include "StickerSosManager.h"
@@ -5,13 +6,12 @@
 BleManager bleMgr;
 
 void BleManager::init() {
-  spotName = "未登録スポット";
+  spotName = "Unregistered";
   distributeStickerId = "st_110";
-  lastSyncTime = "未接続";
+  lastSyncTime = "None";
 
-  // MACアドレスから端末IDを生成
   uint8_t mac[6];
-  esp_read_mac(mac, ESP_MAC_WIFI_STA);
+  WiFi.macAddress(mac);
   char idBuf[16];
   snprintf(idBuf, sizeof(idBuf), "M5-%02X%02X%02X%02X", mac[2], mac[3], mac[4], mac[5]);
   deviceId = String(idBuf);
@@ -40,11 +40,9 @@ void BleManager::init() {
     NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
   );
 
-  pServer->start();
-
   NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->start();
+  NimBLEDevice::startAdvertising();
 }
 
 String BleManager::getTimestamp() {
@@ -79,7 +77,7 @@ void BleManager::onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& 
       stickerSosMgr.flushLogsToBle();
     }
 
-    lastSyncTime = "iPad同期済";
+    lastSyncTime = "iPad Synced";
     updateStatus();
     StateManager::changeState(STATE_IDLE);
   }
