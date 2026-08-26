@@ -6,9 +6,6 @@
 class StickerSosManager {
 private:
   std::vector<String> distributedTodayList;
-  int lastCheckedDay;
-
-  void checkDailyReset();
 
 public:
   std::vector<DistributeLog> pendingDistributeLogs;
@@ -16,6 +13,7 @@ public:
 
   StickerSosManager();
   void handlePacket(const CommunicationPacket& packet, int rssi = -50);
+  void flushLogsToBle();
 };
 
 extern StickerSosManager stickerSosMgr;

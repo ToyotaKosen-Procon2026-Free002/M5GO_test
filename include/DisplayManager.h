@@ -4,11 +4,11 @@
 
 class DisplayManager {
 private:
-  TFT_eSprite sprite;
+  TFT_eSprite* sprite = nullptr;
 
 public:
   DisplayManager();
-  void init();
+  bool init();
   void update();
 };
 
