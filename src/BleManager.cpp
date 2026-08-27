@@ -52,19 +52,19 @@ String BleManager::getTimestamp() {
   return String(buf);
 }
 
-void BleManager::onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) {
+void BleManager::onConnect(NimBLEServer* pServer) {
   deviceConnected = true;
   StateManager::changeState(STATE_BLE_CONNECTED);
   updateStatus();
 }
 
-void BleManager::onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) {
+void BleManager::onDisconnect(NimBLEServer* pServer) {
   deviceConnected = false;
   StateManager::changeState(STATE_IDLE);
   NimBLEDevice::startAdvertising();
 }
 
-void BleManager::onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) {
+void BleManager::onWrite(NimBLECharacteristic* pCharacteristic) {
   std::string val = pCharacteristic->getValue();
   if (val.length() > 0) {
     String payload = String(val.c_str());

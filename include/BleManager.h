@@ -21,9 +21,9 @@ public:
   void sendLogsToApp(const String& jsonLogs);
   String getTimestamp();
 
-  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override;
-  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override;
-  void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override;
+  void onConnect(NimBLEServer* pServer) override;
+  void onDisconnect(NimBLEServer* pServer) override;
+  void onWrite(NimBLECharacteristic* pCharacteristic) override;
 };
 
 extern BleManager bleMgr;
