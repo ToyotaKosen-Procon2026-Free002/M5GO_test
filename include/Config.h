@@ -7,7 +7,8 @@
 #define RSSI_THRESHOLD -60
 
 // 親機 ⇔ アプリ間 BLE GATT UUID
-#define SERVICE_UUID           "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+// 変更前: #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define SERVICE_UUID "42fbd1f2-b02c-1ba6-87f8-7d9ca4f3a343"
 #define CHAR_CONFIG_UUID       "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define CHAR_LOG_UUID          "1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e"
 #define CHAR_STATUS_UUID       "d29ae63e-b7d3-4874-a690-3432b85e05a5"
