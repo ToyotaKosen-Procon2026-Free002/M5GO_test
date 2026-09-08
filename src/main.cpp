@@ -48,8 +48,11 @@ void loop() {
   if (Serial2.available() > 0) {
     String loraMsg = Serial2.readStringUntil('\n');
     loraMsg.trim();
-    if (loraMsg.startsWith("SOS:")) {
-      String childId = loraMsg.substring(4);
+    if (loraMsg.indexOf("SOS") >= 0) {
+      String childId = "CHILD-NODE";
+      if (loraMsg.startsWith("SOS:")) {
+        childId = loraMsg.substring(4);
+      }
       stickerSosMgr.handleSos(childId, "LoRa");
     }
   }
