@@ -1,5 +1,6 @@
 #include <M5Stack.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include "DisplayManager.h"
 #include "StateManager.h"
 #include "BleManager.h"
@@ -11,31 +12,55 @@
 #define LORA_TX_PIN 17
 
 void setup() {
-  M5.begin();
+  M5.begin(true, false, true);
   M5.Power.begin();
   Serial.begin(115200);
-  Serial2.begin(9600, SERIAL_8N1, LORA_RX_PIN, LORA_TX_PIN);
+  delay(100);
 
-  // 1. ハードウェアマネージャーの初期化
   displayMgr.init();
   ledBuzzerMgr.init();
+  delay(50);
 
-  // 2. ESP-NOWを動作させるためにWi-FiドライバをSTAモードで有効化
+  // Wi-Fiドライバを起動し、チャンネルを 1 に固定
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
+  esp_wifi_set_promiscuous(true);
+  esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+  esp_wifi_set_promiscuous(false);
+  delay(100);
 
-  // 3. ESP-NOW & BLE 初期化
   EspNowManager::init();
   bleMgr.init();
 
-  // 4. 初期画面表示
+  Serial2.begin(9600, SERIAL_8N1, LORA_RX_PIN, LORA_TX_PIN);
+
   StateManager::changeState(STATE_IDLE);
 }
 
 void loop() {
   M5.update();
 
-  // 中央ボタン(BtnB)で設定画面と通常画面のトグル
+  // ===================
+  // 【テスト用コード】
+  // ===================
+  /*
+  // ボタンA（左）: ダミー子機の通過検知
+  if (M5.BtnA.wasPressed()) {
+    CommunicationPacket dummyPkt;
+    memset(&dummyPkt, 0, sizeof(dummyPkt));
+    dummyPkt.type = 0;
+    strncpy(dummyPkt.device_id, "TEST-CHILD", sizeof(dummyPkt.device_id) - 1);
+    stickerSosMgr.handlePacket(dummyPkt, -45);
+  }
+
+  // ボタンC（右）: ダミーSOS発信
+  if (M5.BtnC.wasPressed()) {
+    stickerSosMgr.handleSos("TEST-SOS", "BUTTON_C");
+  }
+  */
+
+  // 中央ボタン(BtnB): 設定確認画面の切り替え
   if (M5.BtnB.wasPressed()) {
     if (StateManager::currentState == STATE_SHOW_SETTING) {
       StateManager::changeState(STATE_IDLE);
@@ -44,12 +69,12 @@ void loop() {
     }
   }
 
-  // LoRa経由の遠距離SOS信号受信
+  // LoRa経由のSOS信号受信
   if (Serial2.available() > 0) {
     String loraMsg = Serial2.readStringUntil('\n');
     loraMsg.trim();
     if (loraMsg.indexOf("SOS") >= 0) {
-      String childId = "CHILD-NODE";
+      String childId = "LORA-CHILD";
       if (loraMsg.startsWith("SOS:")) {
         childId = loraMsg.substring(4);
       }
@@ -57,8 +82,7 @@ void loop() {
     }
   }
 
-  // 状態タイムアウト監視 (10秒でIDLE復帰)
+  // タイムアウト監視（10秒で通常画面へ復帰）
   StateManager::checkStateTimeout(10000);
-
   delay(20);
 }

@@ -3,9 +3,12 @@
 
 LedBuzzerManager ledBuzzerMgr;
 
-LedBuzzerManager::LedBuzzerManager() : pixels(NUM_LED, LED_BAR_PIN, NEO_GRB + NEO_KHZ800) {}
+LedBuzzerManager::LedBuzzerManager() {}
 
 void LedBuzzerManager::init() {
+  pixels.updateType(NEO_GRB + NEO_KHZ800);
+  pixels.updateLength(NUM_LED);
+  pixels.setPin(LED_BAR_PIN);
   pixels.begin();
   pixels.clear();
   pixels.show();
