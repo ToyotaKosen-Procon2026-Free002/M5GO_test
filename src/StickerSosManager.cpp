@@ -17,25 +17,29 @@ void StickerSosManager::handleSos(const String& childId, const String& source) {
 }
 
 void StickerSosManager::handlePacket(const CommunicationPacket& packet, int rssi) {
-  String childId = String(packet.device_id);
+  String senderId = String(packet.device_id);
   String timestamp = bleMgr.getTimestamp();
 
+  // ====================================================
+  // 親機判定（相手が親機ならシール配布・すれ違いログをスキップ）
+  // ====================================================
+  if (packet.isGateway) {
+    Serial.printf("[ESP-NOW] Another Gateway detected: %s (Ignored)\n", senderId.c_str());
+    return;
+  }
+
+  // 以降は子機（isGateway == false）からのパケットのみ処理
   if (packet.type == 1) { // SOSパケット
-    handleSos(childId, "ESP-NOW");
+    handleSos(senderId, "ESP-NOW");
   } 
   else if (packet.type == 0) { // 通過・シール要求
     if (rssi >= RSSI_THRESHOLD) {
-      // 1日1回配布制限チェック
-      auto it = std::find(distributedTodayList.begin(), distributedTodayList.end(), childId);
+      auto it = std::find(distributedTodayList.begin(), distributedTodayList.end(), senderId);
       if (it == distributedTodayList.end()) {
-        // 初回配布時のみ配布リストと未送信ログに登録（二重カウント防止）
-        distributedTodayList.push_back(childId);
-        pendingDistributeLogs.push_back({childId, timestamp});
+        distributedTodayList.push_back(senderId);
+        pendingDistributeLogs.push_back({senderId, timestamp});
 
-        // 子機へシールを返信
         EspNowManager::sendSticker(bleMgr.deviceId, bleMgr.distributeStickerId);
-
-        // 画面を配布完了に切り替え
         StateManager::changeState(STATE_STICKER_DISPLAY);
       }
     }
